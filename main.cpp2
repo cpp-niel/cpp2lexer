@@ -1,0 +1,117 @@
+
+ncc: namespace = {
+    detail: namespace = {
+        resume: <Coroutine> (inout coroutine: Coroutine) = {
+            if coroutine {
+                coroutine.resume();
+                if coroutine.done() {
+                    coroutine.promise().throw_on_exception();
+                }
+            }
+        }
+    }
+
+    generator: <T> type = {
+        promise_type: type = {
+            value_type: type == std::remove_reference_t<T>;
+            reference_type: type == std::add_lvalue_reference_t<value_type>;
+            pointer_type: type == std::add_pointer_t<value_type>;
+            suspend_type: type == std::suspend_always;
+            coroutine_type: type == std::coroutine_handle<promise_type>;
+
+            value: (this) -> reference_type = value_ptr_*;
+
+            get_return_object: (inout this) -> generator = generator(coroutine_type::from_promise(this));
+
+            return_void: (this) = {}
+
+            initial_suspend: (this) -> suspend_type = suspend_type();
+            final_suspend: (this) -> suspend_type = suspend_type();
+
+            yield_value: (inout this, inout x: value_type) -> suspend_type = {
+                value_ptr_ = std::addressof(x);
+                return suspend_type();
+            }
+
+            yield_value: (inout this, move x: value_type) -> suspend_type = {
+                value_ptr_ = std::addressof(x);
+                return suspend_type();
+            }
+
+            unhandled_exception: (inout this) = { exception_ = std::current_exception(); }
+
+            throw_on_exception: (inout this) = {
+                if exception_ {
+                    std::rethrow_exception(exception_);
+                }
+            }
+
+            private value_ptr_: pointer_type;
+            private exception_: std::exception_ptr;
+        }
+
+        coroutine_type: type == promise_type::coroutine_type;
+
+        iterator: type = {
+            iterator_category: type == std::input_iterator_tag;
+            value_type: type == std::remove_reference_t<T>;
+            reference: type == std::add_lvalue_reference_t<value_type>;
+            pointer: type == std::add_pointer<value_type>;
+            size_type: type == std::size_t;
+            difference_type: type == std::ptrdiff_t;
+
+            operator=: (out this) = {}
+            operator=: (out this, c: coroutine_type) = this.coroutine_ = c;
+            operator*: (this) -> reference = coroutine_.promise().value();
+            operator->: (this) -> pointer = std::addressof(operator*());
+
+            operator++: (inout this) -> std::add_lvalue_reference_t<iterator> = {
+                detail::resume(coroutine_);
+                return this;
+            }
+
+            operator==: (this, that) -> bool = {
+                return (this.coroutine_ == that.coroutine_) || (this.coroutine_.done() && !that.coroutine_);
+            }
+
+            operator!=: (this, that) -> bool = {
+                return !(this == that);
+            }
+
+            private coroutine_: coroutine_type = nullptr;
+        }
+
+        operator=: (out this, c: coroutine_type) = this.coroutine_ = c;
+        operator=: (move this) = {
+            if coroutine_ {
+                coroutine_.destroy();
+            }
+        }
+        operator=: (inout this, move that) = {
+            this.coroutine_ = that.coroutine_;
+            that.coroutine_ = nullptr;
+        }
+
+        begin: (inout this) -> iterator = {
+            detail::resume(coroutine_);
+            return iterator(coroutine_);
+        }
+
+        end: (inout this) -> iterator = iterator();
+
+        private coroutine_: coroutine_type = nullptr;
+    }
+}
+
+f: (x: int) -> ncc::generator<int> = {
+    i := 0;
+    while i < x next i++ {
+        co_yield(i);  // hacked into cpp2front to make this work
+    }
+}
+
+main : () -> int = {
+    for f(10) do (x) {
+        std::cout << x << "\n";
+    }
+}
