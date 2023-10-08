@@ -1,2 +1,2 @@
 # cpp2lexer
-A Rob Pike style lexer in Cpp2 syntax
+An attempt at a lexer for pure Cpp2 in pure Cpp2.
