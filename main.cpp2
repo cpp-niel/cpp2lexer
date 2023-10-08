@@ -1,117 +1,269 @@
+clx : namespace = {
 
-ncc: namespace = {
-    detail: namespace = {
-        resume: <Coroutine> (inout coroutine: Coroutine) = {
-            if coroutine {
-                coroutine.resume();
-                if coroutine.done() {
-                    coroutine.promise().throw_on_exception();
+    is_alpha: (c: char) -> bool = ('a' <= c <= 'z') || ('A' <= c <= 'Z');
+    is_alnum: (c: char) -> bool = is_alpha(c) || ('0' <= c <= '9');
+    is_alpha_or_underscore: (c: char) -> bool = is_alpha(c) || c == '_';
+    is_alnum_or_underscore: (c: char) -> bool = is_alnum(c) || c == '_';
+    is_not_alnum_or_underscore: (c: char) -> bool = !is_alnum_or_underscore(c);
+
+
+    lexeme : @enum type = {
+        slash_eq := 0;
+        slash;
+        left_shift_eq;
+        left_shift;
+        spaceship;
+        less_eq;
+        less;
+        right_shift_eq;
+        right_shift;
+        greater_eq;
+        greater;
+        plus_plus;
+        plus_eq;
+        plus;
+        minus_minus;
+        minus_eq;
+        arrow;
+        minus;
+        logical_or_eq;
+        logical_or;
+        pipe_eq;
+        pipe;
+        logical_and_eq;
+        logical_and;
+        multiply_eq;
+        multiply;
+        modulo_eq;
+        modulo;
+        ampersand_eq;
+        ampersand;
+        caret_eq;
+        caret;
+        tilde_eq;
+        tilde;
+        equal_comparison;
+        assignment;
+        not_equal_comparison;
+        negation;
+        left_brace;
+        right_brace;
+        left_paren;
+        right_paren;
+        left_bracket;
+        right_bracket;
+        scope;
+        colon;
+        semicolon;
+        comma;
+        dot;
+        ellipsis;
+        question_mark;
+        at;
+        dollar;
+        float_literal;
+        binary_literal;
+        decimal_literal;
+        hexadecimal_literal;
+        string_literal;
+        character_literal;
+        user_defined_literal_suffix;
+        keyword;
+        cpp2_fixed_type;
+        identifier;
+
+        none := 127;
+    }
+
+    _lex_error: (inout l: lexer) = {
+        l.lex_error();
+    }
+
+    _lex_whitespace: (inout l: lexer) = {
+        l.lex_whitespace();
+    }
+
+    _lex_keyword_or_identifier: (inout l: lexer) = {
+        l.lex_keyword_or_identifier();
+    }
+
+    _lex_opening_symbol: (inout l: lexer) = {
+        l.lex_opening_symbol();
+    }
+
+    _lex_closing_symbol: (inout l: lexer) = {
+        l.lex_closing_symbol();
+    }
+
+    _lex_slash: (inout l: lexer) = {
+        l.lex_slash();
+    }
+
+
+    lexer : type = {
+        line: int = 1;
+        column : int = 1;
+        input: std::string_view;
+        tokens: *std::vector<lexeme>;
+        errors: *std::vector<std::string>;
+        lex_functions: std::array<decltype(_lex_error&), 256> = ();
+
+        operator=: (out this, input_string: std::string_view, toks: *std::vector<lexeme>, errs: *std::vector<std::string>) = {
+            input = input_string;
+            tokens = toks;
+            errors = errs;
+
+            c: type == char_spec;
+            init: type == std::initializer_list<c>;
+            set_lex_functions(: init = (c(0, 255)), _lex_error);
+            set_lex_functions(: init = (c(' '), c('\t'), c('\n')), _lex_whitespace);
+            set_lex_functions(: init = (c('_'), c('a', 'z'), c('A', 'Z')), _lex_keyword_or_identifier);
+            set_lex_functions(: init = (c('{'), c('('), c('[')), _lex_opening_symbol);
+            set_lex_functions(: init = (c('}'), c(')'), c(']')), _lex_closing_symbol);
+            set_lex_functions(: init = (c('/')), _lex_slash);
+
+            while !input.empty() {
+                (lex_functions[input.front()]*)(this);
+            }
+        }
+
+        add_token: (inout this, token_kind: lexeme, token_length: int) = {
+            tokens*.push_back(token_kind);
+            advance(token_length);
+        }
+
+        advance: (inout this, n: int) = {
+            column += n;
+            input.remove_prefix(n);
+        }
+
+        lex_error: (inout this) = {
+            errors*.push_back("Unexpected character `(input.front())$`");
+            advance(1); // todo - do something more intelligent here
+        }
+
+        lex_whitespace: (inout this) = {
+            while !input.empty() && std::isspace(input.front()) next advance(1) {
+                if input.front() == '\n' {
+                    line++;
+                    column = 0;
+                }
+            }
+        }
+
+        lex_keyword_or_identifier: (inout this) = {
+            [[assert: is_alpha_or_underscore(input.front())]]
+            length := std::distance(input.begin(), std::ranges::find_if(input, is_not_alnum_or_underscore));
+            add_token(lexeme::identifier, length);
+        }
+
+        lex_opening_symbol: (inout this) = {
+            [[assert: (input.front() == '{') || (input.front() == '(') || (input.front() == '[')]]
+            // todo - push to opening symbol stack
+
+            // todo use inspect?
+            if input.front() == '{' { add_token(lexeme::left_brace, 1); }
+            if input.front() == '(' { add_token(lexeme::left_paren, 1); }
+            if input.front() == '[' { add_token(lexeme::left_bracket, 1); }
+        }
+
+        lex_closing_symbol: (inout this) = {
+            [[assert: (input.front() == '}') || (input.front() == ')') || (input.front() == ']')]]
+            // todo - pop from opening symbol stack and deal with any inconsistencies
+
+            // todo use inspect?
+            if input.front() == '}' { add_token(lexeme::right_brace, 1); }
+            if input.front() == ')' { add_token(lexeme::right_paren, 1); }
+            if input.front() == ']' { add_token(lexeme::right_bracket, 1); }
+        }
+
+        lex_slash: (inout this) = {
+            [[assert: (input.front() == '/')]]
+            if input.starts_with("//") {
+                // todo deal with line comment
+                line_end := input.find('\n');
+                if line_end == std::string_view::npos {
+                    advance(input.ssize());
+                }
+                else {
+                    advance(line_end + 1);
+                }
+            }
+            else if input.starts_with("/*") {
+                // todo deal with block comment
+                block_comment_end := input.find("*/");
+                if block_comment_end == std::string_view::npos {
+                    errors*.push_back("/* without closing */");
+                    advance(input.ssize());
+                }
+                else {
+                    // todo update line & column info
+                    advance(block_comment_end + 2);
+                }
+            }
+            else if input.starts_with("/=") {
+                add_token(lexeme::slash_eq, 2);
+            }
+            else {
+                add_token(lexeme::slash, 1);
+            }
+        }
+
+        private char_rng: @struct type = {
+            first: char;
+            last: char;
+        }
+
+        private char_spec: @union type = {
+            rng: char_rng;
+            c: char;
+
+            operator=: (out this, c0: char) = set_c(c0);
+            operator=: (out this, c0: char, c1: char) = set_rng(char_rng(c0, c1));
+        }
+
+        private set_lex_functions: (inout this, specs: std::initializer_list<char_spec>, func: _) = {
+            for specs do (spec) {
+                if spec.is_rng() {
+                    for std::views::iota(spec.rng().first, spec.rng().last + 1) do (i) {
+                        lex_functions[i] = func;
+                    }
+                }
+                else {
+                    lex_functions[spec.c()] = func;
                 }
             }
         }
     }
 
-    generator: <T> type = {
-        promise_type: type = {
-            value_type: type == std::remove_reference_t<T>;
-            reference_type: type == std::add_lvalue_reference_t<value_type>;
-            pointer_type: type == std::add_pointer_t<value_type>;
-            suspend_type: type == std::suspend_always;
-            coroutine_type: type == std::coroutine_handle<promise_type>;
+    token_sequence: type = {
+        public tokens: std::vector<lexeme> = ();
+        public errors: std::vector<std::string> = ();
 
-            value: (this) -> reference_type = value_ptr_*;
-
-            get_return_object: (inout this) -> generator = generator(coroutine_type::from_promise(this));
-
-            return_void: (this) = {}
-
-            initial_suspend: (this) -> suspend_type = suspend_type();
-            final_suspend: (this) -> suspend_type = suspend_type();
-
-            yield_value: (inout this, inout x: value_type) -> suspend_type = {
-                value_ptr_ = std::addressof(x);
-                return suspend_type();
-            }
-
-            yield_value: (inout this, move x: value_type) -> suspend_type = {
-                value_ptr_ = std::addressof(x);
-                return suspend_type();
-            }
-
-            unhandled_exception: (inout this) = { exception_ = std::current_exception(); }
-
-            throw_on_exception: (inout this) = {
-                if exception_ {
-                    std::rethrow_exception(exception_);
-                }
-            }
-
-            private value_ptr_: pointer_type;
-            private exception_: std::exception_ptr;
+        operator=: (out this, input: std::string_view) = {
+            _ : lexer = (input, tokens&, errors&);
         }
-
-        coroutine_type: type == promise_type::coroutine_type;
-
-        iterator: type = {
-            iterator_category: type == std::input_iterator_tag;
-            value_type: type == std::remove_reference_t<T>;
-            reference: type == std::add_lvalue_reference_t<value_type>;
-            pointer: type == std::add_pointer<value_type>;
-            size_type: type == std::size_t;
-            difference_type: type == std::ptrdiff_t;
-
-            operator=: (out this) = {}
-            operator=: (out this, c: coroutine_type) = this.coroutine_ = c;
-            operator*: (this) -> reference = coroutine_.promise().value();
-            operator->: (this) -> pointer = std::addressof(operator*());
-
-            operator++: (inout this) -> std::add_lvalue_reference_t<iterator> = {
-                detail::resume(coroutine_);
-                return this;
-            }
-
-            operator==: (this, that) -> bool = {
-                return (this.coroutine_ == that.coroutine_) || (this.coroutine_.done() && !that.coroutine_);
-            }
-
-            operator!=: (this, that) -> bool = {
-                return !(this == that);
-            }
-
-            private coroutine_: coroutine_type = nullptr;
-        }
-
-        operator=: (out this, c: coroutine_type) = this.coroutine_ = c;
-        operator=: (move this) = {
-            if coroutine_ {
-                coroutine_.destroy();
-            }
-        }
-        operator=: (inout this, move that) = {
-            this.coroutine_ = that.coroutine_;
-            that.coroutine_ = nullptr;
-        }
-
-        begin: (inout this) -> iterator = {
-            detail::resume(coroutine_);
-            return iterator(coroutine_);
-        }
-
-        end: (inout this) -> iterator = iterator();
-
-        private coroutine_: coroutine_type = nullptr;
     }
 }
 
-f: (x: int) -> ncc::generator<int> = {
-    i := 0;
-    while i < x next i++ {
-        co_yield(i);  // hacked into cpp2front to make this work
+expect_equal : (actual: std::vector<clx::lexeme>, expected: std::vector<clx::lexeme>) = {
+    if !std::ranges::equal(actual, expected) {
+        std::cout << "Difference detected. Expected:\n  ";
+        for expected do (l) { std::cout << l.to_string() << ", ";  }
+        std::cout << "\nActual:\n  ";
+        for actual do (l) { std::cout << l.to_string() << ", ";  }
+        std::cout << "\n\n";
     }
 }
 
 main : () -> int = {
-    for f(10) do (x) {
-        std::cout << x << "\n";
-    }
+    lx : type == clx::lexeme;
+
+    expect_equal(clx::token_sequence("{hello(world)}").tokens, : std::vector = (lx::left_brace, lx::identifier, lx::left_paren, lx::identifier, lx::right_paren, lx::right_brace));
+    expect_equal(clx::token_sequence("{{(\n\n(\t\n\t [ [ ] ] ) )}}").tokens, : std::vector = (lx::left_brace, lx::left_brace, lx::left_paren, lx::left_paren, lx::left_bracket, lx::left_bracket, lx::right_bracket, lx::right_bracket, lx::right_paren, lx::right_paren, lx::right_brace, lx::right_brace));
+    expect_equal(clx::token_sequence("a /= b").tokens, : std::vector = (lx::identifier, lx::slash_eq, lx::identifier));
+    expect_equal(clx::token_sequence("a / b").tokens, : std::vector = (lx::identifier, lx::slash, lx::identifier));
+    expect_equal(clx::token_sequence("a // this is all skipped").tokens, : std::vector = (lx::identifier));
+    expect_equal(clx::token_sequence("a // this is all skipped\nb").tokens, : std::vector = (lx::identifier, lx::identifier));
+    expect_equal(clx::token_sequence("a /* this is all skipped */ b").tokens, : std::vector = (lx::identifier, lx::identifier));
 }
